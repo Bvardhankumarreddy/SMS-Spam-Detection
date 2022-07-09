@@ -1,0 +1,300 @@
+					  SMS SPAM DETECTION
+-------------------------------------------------------------------------------------------------------------------------------------
+=>Impoting the libraries
+
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+%matplotlib inline
+import nltk
+import string
+from nltk.corpus import stopwords
+from nltk.stem import SnowballStemmer
+--------------------------------------------------------------------------------
+data = pd.read_csv("spam.csv")
+data.head()
+--------------------------------------------------------------------------------
+=>Data Cleaning
+
+df.info()
+--------------------------------------------------------------------------------
+data.isnull().sum()
+--------------------------------------------------------------------------------
+data.drop(columns=["Unnamed: 2", "Unnamed: 3", "Unnamed: 4"], inplace=True)
+--------------------------------------------------------------------------------
+#info after removing columns
+data.info()
+--------------------------------------------------------------------------------
+data.head()
+--------------------------------------------------------------------------------
+data.v1.value_counts()
+--------------------------------------------------------------------------------
+sns.countplot(x=data.v1)
+--------------------------------------------------------------------------------
+
+stemmer = SnowballStemmer("english")
+
+def simplify_data(data):
+    # Create new tables named "Spam" and "Text"
+    # Convert ham/spam to 0/1, 1 indicating Spam and fill them under Spam
+    # Clean text by removing all special characters
+    # Drop unwanted columns
+    
+    data = pd.read_csv("spam.csv")          # Refreshing data, just in-case the code is ran after running further modules
+    data["Spam"] = data.v1.map({'ham':0, 'spam':1})
+    data["Text"] = data.v2.str.lower()
+    data.Text = data.Text.str.replace(r'[.,\\&;!:-?(|)#@$^%*0-9/\'\"+={|}~`_[|]]*', '')
+    data = data.drop(["v1", "v2", "Unnamed: 2", "Unnamed: 3", "Unnamed: 4"], axis=1)
+    return data
+    
+def remove_stopwords(message):
+    # Remove stop words from the text
+    
+    stop_words = set(stopwords.words('english'))
+    message = message.translate(str.maketrans('', '', string.punctuation))
+    text = [word for word in message.split() if word not in stop_words and len(word) > 2]
+    return " ".join(text)
+
+def text_length(text):
+    return len(text)
+    
+def format_length(data):
+    data["Length"] = data.Text.apply(text_length)
+    data.Length = pd.cut(data.Length, [-1, 10, 20, 30, 50, 75, 100, 999], labels=[10,20,30,50,75,100,200])
+    return data
+    
+def apply_transformations(data):
+    data = simplify_data(data)
+    data.Text = data.Text.apply(remove_stopwords)
+    data = format_length(data)
+    return data
+
+data = apply_transformations(data)
+data.head()
+--------------------------------------------------------------------------------
+
+plt.figure(figsize=(16,10))
+plt.xlabel("Length")
+plt.ylabel("Number of Spam messages")
+sns.countplot(x=data.Length, hue=data.Spam)
+--------------------------------------------------------------------------------
+
+# For the first model, we will try to create a feature of our own
+# We can calculate number of spam words and the number of ham words
+# These numbers can be compared to make out whether a message has
+# more ham features or more spam features
+
+# Calculating the number of Spam/Ham words in a message and Storing
+# the diff Spam-Ham(0 if Ham>Spam, 1 if Spam>Ham))
+
+
+# Create a list of all words occuring in Spam/Ham
+spam_words = []
+ham_words = []
+
+def getSpam(text):
+    global spam_words, spam_messages
+    messages = text.split()
+    words = [x for x in messages]
+    spam_words += words
+    
+def getHam(text):
+    global ham_words, ham_messages
+    messages = text.split()
+    words = [x for x in messages]
+    ham_words += words
+    
+# Separate spam and ham messages
+spam_messages = data[data["Spam"] == 1]["Text"]
+ham_messages = data[data["Spam"] == 0]["Text"]
+
+# Store common words in Spam/Ham
+spam_messages.apply(getSpam)
+ham_messages.apply(getHam)
+
+
+def countSpam(text):
+    count = 0
+    for x in text.split():
+        if x in spam_words:
+            count += spam_words.count(x)
+    return count
+
+def countHam(text):
+    count = 0
+    for x in text.split():
+        if x in ham_words:
+            count += ham_words.count(x)
+    return count
+
+def getCounts(data):
+    SpamCount = data.Text.apply(countSpam)
+    HamCount = data.Text.apply(countHam)
+    data["Diff"] = SpamCount - HamCount
+    return data
+
+def categorize(diff):
+    if diff <= 0:
+        return 0
+    else:
+        return 1
+
+def apply_calc(data):
+    data = getCounts(data)
+    data.Diff = data.Diff.apply(categorize)
+    return data
+
+data = apply_calc(data)
+
+--------------------------------------------------------------------------------
+
+data.head()
+#to show the diff data and length of sentence 
+--------------------------------------------------------------------------------
+spam_words.count("free")
+--------------------------------------------------------------------------------
+ham_words.count("free")
+--------------------------------------------------------------------------------
+
+from sklearn.model_selection import train_test_split, GridSearchCV
+
+X = data.drop(["Spam"], axis=1)
+X_train, X_test, y_train, y_test = train_test_split(X, data.Spam, test_size=0.2, random_state=23)
+--------------------------------------------------------------------------------
+#accuracy of train and test data
+from sklearn.metrics import accuracy_score, make_scorer
+print("Accuracy on train data: ", accuracy_score(X_train.Diff, y_train))
+print("Accuracy on test data: ", accuracy_score(X_test.Diff, y_test))
+--------------------------------------------------------------------------------
+==>Building Model
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.naive_bayes import GaussianNB
+--------------------------------------------------------------------------------
+
+X_train = X_train[["Length", "Diff"]]
+X_test = X_test[["Length", "Diff"]]
+--------------------------------------------------------------------------------
+# RandomForestModel
+# Trying different parameters and selecting the best one's to run
+clf = RandomForestClassifier()
+parameters = {'n_estimators': [4, 6, 9], 
+              'max_features': ['log2', 'sqrt','auto'], 
+              'criterion': ['entropy', 'gini'],
+              'max_depth': [2, 3, 5, 10], 
+              'min_samples_split': [2, 3, 5],
+              'min_samples_leaf': [1,5,8]
+             }
+acc_scorer = make_scorer(accuracy_score)
+grid_obj = GridSearchCV(clf, parameters, scoring=acc_scorer, cv=3)
+grid_obj = grid_obj.fit(X_train, y_train)
+clf = grid_obj.best_estimator_
+
+clf.fit(X_train, y_train)
+
+# Predicting the reuslts and calculating the accuracy
+
+preds = clf.predict(X_test)
+
+clf_acc = nb_acc = accuracy_score(y_test, preds)
+print("Accuracy with RandomForestClassifier: ", accuracy_score(y_test, preds))
+
+# SVC model
+svc_clf = SVC(gamma='scale')
+svc_clf.fit(X_train,y_train)
+svc_preds = svc_clf.predict(X_test)
+
+svc_acc = accuracy_score(y_test, svc_preds)
+print("Accuracy with SVC: ", accuracy_score(y_test, svc_preds))
+
+nb = GaussianNB()
+nb.fit(X_train, y_train)
+nb_preds = nb.predict(X_test)
+
+nb_acc = accuracy_score(y_test, nb_preds)
+print("Accuracy with NaiveBayesian: ", accuracy_score(y_test, nb_preds))
+
+--------------------------------------------------------------------------------
+sns.countplot(x=X_test.Length, hue=y_test)
+--------------------------------------------------------------------------------
+#defining the c_report and confusion matrix functions
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+
+def c_report(y_true, y_pred):
+   print("Classification Report")
+   print(classification_report(y_true, y_pred))
+   acc_sc = accuracy_score(y_true, y_pred)
+   print("Accuracy : "+ str(acc_sc))
+   return acc_sc
+
+def plot_confusion_matrix(y_true, y_pred):
+   mtx = confusion_matrix(y_true, y_pred)
+   sns.heatmap(mtx, annot=True, fmt='d', linewidths=.5, 
+               cmap="Blues", cbar=False)
+   plt.ylabel('True label')
+   plt.xlabel('Predicted label')
+--------------------------------------------------------------------------------
+#confusion matrix between data.spam and data.diff
+from sklearn.metrics import confusion_matrix
+plot_confusion_matrix(data.Spam, data.Diff)
+--------------------------------------------------------------------------------
+#confusion matrix between y_test and preds
+plot_confusion_matrix(y_test, preds)
+--------------------------------------------------------------------------------
+#Printing classification report
+c_report(y_test, preds)
+
+--------------------------------------------------------------------------------
+#printing the accuracy,precision,recall and F1-score of Random Forest Classifier
+from sklearn.metrics import precision_score, accuracy_score, recall_score, f1_score
+print(f"Accuracy: {round(accuracy_score(y_test, preds), 2)}") 
+print(f"Precision: {round(precision_score(y_test, preds), 2)}")
+print(f"Recall: {round(recall_score(y_test, preds), 2)}")
+print(f"F1_score: {round(f1_score(y_test, preds), 2)}")
+
+--------------------------------------------------------------------------------
+==> Output of Model
+
+def manual_entry():
+    global clf
+    temp = pd.DataFrame(columns=["Text"])
+    temp = temp.append({"Text": input("Enter message: ")}, ignore_index=True)
+
+    temp = format_length(temp)
+    temp = apply_calc(temp)
+    temp = temp.drop(["Text"], axis=1)
+
+    if temp.Diff.loc[0] == 1:
+        print("Spam")
+    else:
+        print("Ham")
+        
+manual_entry()
+
+Output:
+Enter message: Congratulations! You've won a free phone. Call now on 9999999999
+Spam
+--------------------------------------------------------------------------------
+def manual_entry():
+    global clf
+    temp = pd.DataFrame(columns=["Text"])
+    temp = temp.append({"Text": input("Enter message: ")}, ignore_index=True)
+
+    temp = format_length(temp)
+    temp = apply_calc(temp)
+    temp = temp.drop(["Text"], axis=1)
+
+    if temp.Diff.loc[0] == 1:
+        print("Spam")
+    else:
+        print("Ham")
+        
+manual_entry()
+
+Output:
+Enter message: Go until jurong point, crazy.. Available only in bugis n great world la e buffet... Cine there got amore wat...
+Ham
+-----------------------------------------------------------------------------------------
+
+
